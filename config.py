@@ -1,19 +1,16 @@
 # config.py - Complete configuration for OSINT Pro Bot on Render
-# 📅 Last updated: February 2026
-# ⚡ Compatible with Python 3.14.3 (aur 3.11+ bhi)
 
 import os
 
 # ==================== BOT TOKEN ====================
-# Render ke environment variable se lega, nahi to placeholder
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
-# ==================== DATABASE PATH ====================
-DB_PATH = "osint_bot.db"  # SQLite database file name
+# ==================== DATABASE ====================
+DB_PATH = "bot_database.db"
 
 # ==================== OWNER & ADMINS ====================
-OWNER_ID = 8104850843  # Owner ka Telegram user ID
-INITIAL_ADMINS = [8104850843, 5987905091]  # Ye DB me automatically add honge
+OWNER_ID = 8104850843
+INITIAL_ADMINS = [8104850843, 5987905091]
 
 # ==================== FORCE JOIN CHANNELS ====================
 FORCE_JOIN_CHANNELS = [
@@ -42,24 +39,12 @@ LOG_CHANNELS = {
 }
 
 # ==================== GLOBAL BRANDING BLACKLIST ====================
-# Ye text automatically API response se remove hoga
 GLOBAL_BLACKLIST = [
-    "@patelkrish_99",
-    "patelkrish_99",
-    "t.me/anshapi",
-    "anshapi",
-    "@Kon_Hu_Mai",
-    "Kon_Hu_Mai",
-    "Dm to buy access",
-    "Dm to buy access",
-    "credit",
-    "validity",
-    "expires_on",
+    "@patelkrish_99", "patelkrish_99", "t.me/anshapi", "anshapi",
+    "@Kon_Hu_Mai", "Kon_Hu_Mai", "Dm to buy access"
 ]
 
-# ==================== COMMANDS (WITH DESCRIPTIONS) ====================
-# Note: Kuch APIs abhi broken hain, unke alternatives comments mein diye hain.
-# Aap khud test karke working URLs replace kar sakte ho.
+# ==================== COMMANDS ====================
 COMMANDS = {
     "num": {
         "url": "https://num-free-rootx-jai-shree-ram-14-day.vercel.app/?key=lundkinger&number={}",
@@ -67,9 +52,7 @@ COMMANDS = {
         "log": LOG_CHANNELS["num"],
         "desc": "Phone number basic lookup",
         "extra_blacklist": [
-            "dm to buy",
-            "owner",
-            "@kon_hu_mai",
+            "dm to buy", "owner", "@kon_hu_mai",
             "Ruk ja bhencho itne m kya unlimited request lega?? Paid lena h to bolo 100-400₹ @Simpleguy444"
         ]
     },
@@ -78,17 +61,8 @@ COMMANDS = {
         "param": "user id",
         "log": LOG_CHANNELS["tg2num"],
         "desc": "Telegram user ID to number (if available)",
-        "extra_blacklist": [
-            "code",
-            "validity",
-            "hours_remaining",
-            "days_remaining",
-            "expires_on",
-            "https://t.me/AbdulBotzOfficial",
-            "AbdulDevStoreBot",
-            "@AbdulDevStoreBot",
-            "credit"
-        ]
+        "extra_blacklist": ["code", "validity", "hours_remaining", "days_remaining", "expires_on",
+                            "https://t.me/AbdulBotzOfficial", "AbdulDevStoreBot", "@AbdulDevStoreBot", "credit"]
     },
     "vehicle": {
         "url": "https://vehicle-info-aco-api.vercel.app/info?vehicle={}",
@@ -119,7 +93,6 @@ COMMANDS = {
         "extra_blacklist": []
     },
     "ffinfo": {
-        # ⚠️ Ye API broken ho sakti hai. Alternative dhundh kar replace karein.
         "url": "https://official-free-fire-info.onrender.com/player-info?key=DV_M7-INFO_API&uid={}",
         "param": "uid",
         "log": LOG_CHANNELS["ffinfo"],
@@ -127,7 +100,6 @@ COMMANDS = {
         "extra_blacklist": []
     },
     "ffban": {
-        # ⚠️ Ye API broken ho sakti hai. Alternative dhundh kar replace karein.
         "url": "https://abbas-apis.vercel.app/api/ff-ban?uid={}",
         "param": "uid",
         "log": LOG_CHANNELS["ffban"],
@@ -156,7 +128,6 @@ COMMANDS = {
         "extra_blacklist": []
     },
     "insta": {
-        # ⚠️ Ye API broken ho sakti hai. Alternative: koi stable Instagram scraper use karein.
         "url": "https://mkhossain.alwaysdata.net/instanum.php?username={}",
         "param": "username",
         "log": LOG_CHANNELS["insta"],
@@ -164,7 +135,6 @@ COMMANDS = {
         "extra_blacklist": []
     },
     "tginfo": {
-        # ⚠️ Ye API broken ho sakti hai. Alternative: bot se getChat use kar sakte ho (sirf public groups/channels ke liye).
         "url": "https://openosintx.vippanel.in/tgusrinfo.php?key=OpenOSINTX-FREE&user={}",
         "param": "username/userid",
         "log": LOG_CHANNELS["tginfo"],
@@ -172,7 +142,6 @@ COMMANDS = {
         "extra_blacklist": []
     },
     "tginfopro": {
-        # ⚠️ Ye API broken ho sakti hai.
         "url": "https://api.b77bf911.workers.dev/telegram?user={}",
         "param": "username/userid",
         "log": LOG_CHANNELS["tginfopro"],
@@ -180,8 +149,7 @@ COMMANDS = {
         "extra_blacklist": []
     },
     "git": {
-        # ✅ GitHub official API – stable aur free
-        "url": "https://api.github.com/users/{}",
+        "url": "https://abbas-apis.vercel.app/api/github?username={}",
         "param": "username",
         "log": LOG_CHANNELS["git"],
         "desc": "GitHub account details",
@@ -201,13 +169,5 @@ BRANDING = {
     "developer": "@Nullprotocol_X",
     "powered_by": "NULL PROTOCOL"
 }
-
-# Footer for command lists (used in /start and /help)
 CMD_LIST_FOOTER = "\n\n────────────────────────────\n⚡ Fast • Accurate • Secure\n👨‍💻 DEVELOPED BY NULL PROTOCOL"
-
-# Redirect bot for private messages
 REDIRECT_BOT = "@osintfatherNullBot"
-
-# ==================== OTHER SETTINGS ====================
-# Cache expiry for copy feature (seconds)
-CACHE_EXPIRY = 300
