@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-# main.py - Complete OSINT Pro Bot with Admin Panel, Media Broadcast, Groups List, File Output
-# 📅 Last updated: February 2026
-# ⚡ Compatible with Python 3.14.3+
+# main.py - OSINT Pro Bot with all features (admin panel, bulkDM, group list, long output file, two-step broadcast etc.)
 
 import os
 import sys
@@ -13,16 +11,15 @@ import asyncio
 import logging
 import threading
 import html
-import io
 import aiohttp
-import aiosqlite
 from datetime import datetime
 from flask import Flask, jsonify
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    filters, ContextTypes, CallbackQueryHandler
+    Application, CommandHandler, MessageHandler, ChatMemberHandler,
+    filters, ContextTypes, CallbackQueryHandler, ConversationHandler
 )
+from telegram.constants import ParseMode
 
 # Import config and database
 from config import *
@@ -37,8 +34,11 @@ logger = logging.getLogger(__name__)
 
 flask_app = Flask(__name__)
 
+# ==================== CONVERSATION STATES ====================
+WAITING_MESSAGE = 1
+
 # ==================== UTILITY FUNCTIONS ====================
-# CACHE_EXPIRY already imported from config
+CACHE_EXPIRY = 300
 copy_cache = {}
 
 def clean_branding(text, extra_blacklist=None):
@@ -108,10 +108,9 @@ def get_commands_list():
 
 def get_admin_commands_list():
     admin_cmds = [
-        "`/broadcast` - Send message to all users (reply to media/text)",
-        "`/dm <user_id>` - DM a user (reply to media/text)",
-        "`/bulkdm <id1> <id2> ...` - DM multiple users (reply to media/text)",
-        "`/groups` - List groups where bot is admin",
+        "`/broadcast` - Send a message to all users (two-step)",
+        "`/dm <user_id>` - DM to one user (two-step)",
+        "`/bulkdm <id1> <id2> ...` - Bulk DM (two-step)",
         "`/ban <user_id> [reason]` - Ban a user",
         "`/unban <user_id>` - Unban a user",
         "`/deleteuser <user_id>` - Delete user from DB",
@@ -124,11 +123,12 @@ def get_admin_commands_list():
         "`/stats` - Bot statistics",
         "`/dailystats [days]` - Daily stats",
         "`/lookupstats` - Command usage stats",
-        "`/addadmin <user_id>` - Add admin (owner only)",
-        "`/removeadmin <user_id>` - Remove admin (owner only)",
+        "`/addadmin <user_id>` (owner only)",
+        "`/removeadmin <user_id>` (owner only)",
         "`/listadmins` - List all admins",
         "`/settings` - Bot settings (WIP)",
-        "`/fulldbbackup` - Download database backup"
+        "`/fulldbbackup` - Download database backup",
+        "`/group` - List groups where bot is admin"
     ]
     lines = ["👑 **ADMIN COMMANDS**", "────────────────────────────"]
     lines.extend(admin_cmds)
@@ -147,7 +147,7 @@ async def group_only(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
             return True
         await update.message.reply_text(
             f"⚠️ **Ye bot sirf group me kaam karta hai.**\nPersonal use ke liye use kare: {REDIRECT_BOT}",
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN
         )
         return False
     return True
@@ -159,14 +159,14 @@ async def force_join_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if user.id == OWNER_ID or await is_admin(user.id):
         return True
     if await is_banned(user.id):
-        await update.message.reply_text("❌ **Aap banned hain. Contact admin.**", parse_mode='Markdown')
+        await update.message.reply_text("❌ **Aap banned hain. Contact admin.**", parse_mode=ParseMode.MARKDOWN)
         return False
     ok, missing = await check_force_join(context.bot, user.id)
     if not ok:
         await update.message.reply_text(
             "⚠️ **Bot use karne ke liye ye channels join karo:**",
             reply_markup=get_force_join_keyboard(missing),
-            parse_mode='Markdown'
+            parse_mode=ParseMode.MARKDOWN
         )
         return False
     return True
@@ -178,12 +178,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update_user(user.id, user.username, user.first_name, user.last_name)
     except Exception as e:
         logger.error(f"Failed to update user: {e}")
-
     if not await force_join_filter(update, context):
         return
-
     welcome = f"👋 **Welcome {user.first_name}!**\n\n" + get_commands_list()
-    await update.message.reply_text(welcome, parse_mode='Markdown')
+    await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -191,21 +189,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update_user(user.id, user.username, user.first_name, user.last_name)
     except Exception as e:
         logger.error(f"Failed to update user: {e}")
-
     if not await force_join_filter(update, context):
         return
-
-    await update.message.reply_text(get_commands_list(), parse_mode='Markdown')
+    await update.message.reply_text(get_commands_list(), parse_mode=ParseMode.MARKDOWN)
 
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id != OWNER_ID and not await is_admin(user.id):
-        await update.message.reply_text("❌ **This command is for admins only.**", parse_mode='Markdown')
+        await update.message.reply_text("❌ **This command is for admins only.**", parse_mode=ParseMode.MARKDOWN)
         return
+    await update.message.reply_text(get_admin_commands_list(), parse_mode=ParseMode.MARKDOWN)
 
-    await update.message.reply_text(get_admin_commands_list(), parse_mode='Markdown')
-
-# ==================== COMMAND HANDLER (Main Lookup) ====================
+# ==================== COMMAND HANDLER (with branding, log, long output as file) ====================
 async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd: str, query: str):
     cmd_info = COMMANDS.get(cmd)
     if not cmd_info:
@@ -232,49 +227,52 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd
             "powered_by": BRANDING["powered_by"]
         }
 
-    # Clean branding (remove unwanted text from original API response)
+    # Clean branding from original API response
     json_str = json.dumps(data, indent=2, ensure_ascii=False)
     cleaned = clean_branding(json_str, cmd_info.get("extra_blacklist", []))
     cleaned_escaped = html.escape(cleaned)
 
-    # Extra footer
     extra_footer = "\n\n━━━━━━━━━━━━━━━━━━━━\n👨‍💻 **Developer:** @Nullprotocol_X\n⚡ **Powered by:** NULL PROTOCOL"
-    output_text = f"{json.dumps(data, indent=2, ensure_ascii=False)}\n\n━━━━━━━━━━━━━━━━━━━━\n👨‍💻 Developer: @Nullprotocol_X\n⚡ Powered by: NULL PROTOCOL"
 
-    # Check length and decide to send as file or normal message
-    if len(output_text) > 4000:
-        # Send as file
-        file_data = io.BytesIO(output_text.encode('utf-8'))
-        file_data.name = f"{cmd}_{query[:20]}.txt"
-        await update.message.reply_document(
-            document=file_data,
-            caption=f"📁 Output too long, sent as file.\n👨‍💻 Developer: @Nullprotocol_X",
-            parse_mode='Markdown'
-        )
+    # Check length and send as file if >3000 chars
+    if len(cleaned) > 3000:
+        filename = f"{cmd}_{query[:50].replace(' ', '_')}.json"
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(cleaned)
+        with open(filename, 'rb') as f:
+            await update.message.reply_document(
+                document=f,
+                filename=filename,
+                caption=f"📎 Output too long, sent as file.\n{extra_footer}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        os.remove(filename)
     else:
         output_html = f"<pre>{cleaned_escaped}</pre>{extra_footer}"
         keyboard = [[get_copy_button(data), get_search_button(cmd)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(output_html, parse_mode='HTML', reply_markup=reply_markup)
+        await update.message.reply_text(output_html, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
-    # Save to DB
+    # Save lookup to DB
     try:
         await save_lookup(update.effective_user.id, cmd, query, data)
     except Exception as e:
         logger.error(f"Failed to save lookup: {e}")
 
-    # Log to channel with user info
-    user = update.effective_user
-    username_display = f"@{user.username}" if user.username else f"{user.first_name}"
-    log_text = f"👤 **User:** {user.id} ({username_display})\n🔍 **Command:** /{cmd}\n📝 **Query:** `{query}`\n\n```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+    # Log to channel with JSON formatting and user info
+    log_text = (
+        f"👤 **User:** {update.effective_user.id} (@{update.effective_user.username or 'N/A'})\n"
+        f"🔍 **Command:** /{cmd}\n"
+        f"📝 **Query:** `{query}`\n\n"
+        f"```json\n{json.dumps(data, indent=2, ensure_ascii=False)}\n```"
+    )
     if len(log_text) > 4000:
         log_text = log_text[:4000] + "..."
     try:
-        await context.bot.send_message(chat_id=cmd_info["log"], text=log_text, parse_mode='Markdown')
+        await context.bot.send_message(chat_id=cmd_info["log"], text=log_text, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         logger.error(f"Failed to send log to channel: {e}")
 
-# ==================== MESSAGE HANDLER (Entry point) ====================
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await group_only(update, context):
         return
@@ -287,17 +285,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Failed to update user: {e}")
 
-    # Track group if message is from group
-    chat = update.effective_chat
-    if chat.type in ['group', 'supergroup']:
-        try:
-            invite_link = None
-            if chat.username:
-                invite_link = f"https://t.me/{chat.username}"
-            await add_or_update_group(chat.id, chat.title, chat.username, invite_link)
-        except Exception as e:
-            logger.error(f"Failed to update group: {e}")
-
     text = update.message.text
     if not text or not text.startswith('/'):
         return
@@ -308,7 +295,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not query:
         param = COMMANDS.get(cmd, {}).get("param", "query")
-        await update.message.reply_text(f"Usage: `/{cmd} <{param}>`", parse_mode='Markdown')
+        await update.message.reply_text(f"Usage: `/{cmd} <{param}>`", parse_mode=ParseMode.MARKDOWN)
         return
 
     await handle_command(update, context, cmd, query)
@@ -322,12 +309,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "verify_join":
         ok, missing = await check_force_join(context.bot, query.from_user.id)
         if ok:
-            await query.edit_message_text("✅ **Verification successful! Ab aap bot use kar sakte hain.**", parse_mode='Markdown')
+            await query.edit_message_text("✅ **Verification successful! Ab aap bot use kar sakte hain.**", parse_mode=ParseMode.MARKDOWN)
         else:
             await query.edit_message_text(
                 "⚠️ **Aapne abhi bhi kuch channels join nahi kiye:**",
                 reply_markup=get_force_join_keyboard(missing),
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN
             )
     elif data.startswith("copy:"):
         uid = data.split(":", 1)[1]
@@ -335,48 +322,126 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if entry and (time.time() - entry["time"]) < CACHE_EXPIRY:
             await query.message.reply_text(
                 f"```json\n{json.dumps(entry['data'], indent=2)}\n```",
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN
             )
             del copy_cache[uid]
         else:
             copy_cache.pop(uid, None)
-            await query.message.reply_text("❌ **Copy data expired. Please run the command again.**", parse_mode='Markdown')
+            await query.message.reply_text("❌ **Copy data expired. Please run the command again.**", parse_mode=ParseMode.MARKDOWN)
     elif data.startswith("search:"):
         cmd = data.split(":", 1)[1]
-        await query.message.reply_text(f"Send `/{cmd}` with your query.", parse_mode='Markdown')
+        await query.message.reply_text(f"Send `/{cmd}` with your query.", parse_mode=ParseMode.MARKDOWN)
 
-# ==================== ADMIN COMMAND HELPERS ====================
-async def copy_message_to_user(bot, user_id: int, message: Message, caption: str = None):
-    """Copy any type of message to a user."""
+# ==================== CONVERSATION HANDLERS FOR BROADCAST/DM/BULKDM ====================
+async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != OWNER_ID and not await is_admin(user.id):
+        await update.message.reply_text("❌ Admin only.")
+        return ConversationHandler.END
+    context.user_data['broadcast_targets'] = 'all'
+    await update.message.reply_text(
+        "Send the message you want to broadcast to all users.\n"
+        "You can send any type: text, photo, video, document, poll, etc.\n"
+        "Send /cancel to abort."
+    )
+    return WAITING_MESSAGE
+
+async def dm_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != OWNER_ID and not await is_admin(user.id):
+        await update.message.reply_text("❌ Admin only.")
+        return ConversationHandler.END
     try:
-        if message.text:
-            await bot.send_message(chat_id=user_id, text=message.text)
-        elif message.photo:
-            file_id = message.photo[-1].file_id
-            await bot.send_photo(chat_id=user_id, photo=file_id, caption=caption or message.caption)
-        elif message.video:
-            await bot.send_video(chat_id=user_id, video=message.video.file_id, caption=caption or message.caption)
-        elif message.document:
-            await bot.send_document(chat_id=user_id, document=message.document.file_id, caption=caption or message.caption)
-        elif message.audio:
-            await bot.send_audio(chat_id=user_id, audio=message.audio.file_id, caption=caption or message.caption)
-        elif message.voice:
-            await bot.send_voice(chat_id=user_id, voice=message.voice.file_id, caption=caption or message.caption)
-        elif message.video_note:
-            await bot.send_video_note(chat_id=user_id, video_note=message.video_note.file_id)
-        elif message.sticker:
-            await bot.send_sticker(chat_id=user_id, sticker=message.sticker.file_id)
-        elif message.poll:
-            # Poll can't be copied; fallback to forward
-            await bot.forward_message(chat_id=user_id, from_chat_id=message.chat_id, message_id=message.message_id)
-        else:
-            await bot.forward_message(chat_id=user_id, from_chat_id=message.chat_id, message_id=message.message_id)
-        return True
-    except Exception as e:
-        logger.error(f"Failed to send to {user_id}: {e}")
-        return False
+        target = int(context.args[0])
+    except (IndexError, ValueError):
+        await update.message.reply_text("Usage: /dm <user_id>")
+        return ConversationHandler.END
+    context.user_data['dm_targets'] = [target]
+    await update.message.reply_text(
+        f"Send the message you want to send to {target}.\n"
+        "You can send any type: text, photo, video, document, poll, etc.\n"
+        "Send /cancel to abort."
+    )
+    return WAITING_MESSAGE
 
-# Admin decorators
+async def bulkdm_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != OWNER_ID and not await is_admin(user.id):
+        await update.message.reply_text("❌ Admin only.")
+        return ConversationHandler.END
+    if not context.args:
+        await update.message.reply_text("Usage: /bulkdm <id1> <id2> ...")
+        return ConversationHandler.END
+    targets = []
+    for arg in context.args:
+        try:
+            targets.append(int(arg))
+        except ValueError:
+            await update.message.reply_text(f"Invalid ID: {arg}")
+            return ConversationHandler.END
+    context.user_data['bulkdm_targets'] = targets
+    await update.message.reply_text(
+        f"Send the message you want to send to {len(targets)} users.\n"
+        "You can send any type: text, photo, video, document, poll, etc.\n"
+        "Send /cancel to abort."
+    )
+    return WAITING_MESSAGE
+
+async def receive_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This handler receives any message after the command
+    message = update.message
+
+    if 'broadcast_targets' in context.user_data:
+        # Broadcast to all users
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT user_id FROM users') as cursor:
+                users = await cursor.fetchall()
+        success, fail = 0, 0
+        for (uid,) in users:
+            try:
+                await message.copy(chat_id=uid)
+                success += 1
+            except Exception as e:
+                logger.error(f"Broadcast to {uid} failed: {e}")
+                fail += 1
+        await message.reply_text(f"✅ Broadcast completed.\nSuccess: {success}\nFailed: {fail}")
+
+    elif 'dm_targets' in context.user_data:
+        targets = context.user_data['dm_targets']
+        for uid in targets:
+            try:
+                await message.copy(chat_id=uid)
+                await message.reply_text(f"✅ Message sent to {uid}")
+            except Exception as e:
+                await message.reply_text(f"❌ Failed to send to {uid}: {e}")
+
+    elif 'bulkdm_targets' in context.user_data:
+        targets = context.user_data['bulkdm_targets']
+        success, fail = 0, 0
+        for uid in targets:
+            try:
+                await message.copy(chat_id=uid)
+                success += 1
+            except Exception as e:
+                logger.error(f"BulkDM to {uid} failed: {e}")
+                fail += 1
+        await message.reply_text(f"✅ BulkDM completed.\nSuccess: {success}\nFailed: {fail}")
+
+    else:
+        # Should not happen
+        await message.reply_text("Error: No operation in progress.")
+        return ConversationHandler.END
+
+    # Clear user_data and end conversation
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Operation cancelled.")
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# ==================== OTHER ADMIN COMMANDS ====================
 def admin_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -389,98 +454,8 @@ def owner_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id == OWNER_ID:
             return await func(update, context)
-        await update.message.reply_text("❌ This command is for owner only.")
+        await update.message.reply_text("❌ Owner only command.")
     return wrapper
-
-# ==================== ADMIN COMMANDS ====================
-@admin_only
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Broadcast a message to all users. Usage: /broadcast (reply to a message)"""
-    message = update.message.reply_to_message
-    if not message:
-        await update.message.reply_text("Please reply to a message (text/photo/video/doc) with /broadcast")
-        return
-
-    users = await get_all_users(limit=1000000)  # Get all users
-    success, fail = 0, 0
-    for user_row in users:
-        user_id = user_row[0]
-        if await copy_message_to_user(context.bot, user_id, message):
-            success += 1
-        else:
-            fail += 1
-    await update.message.reply_text(f"✅ Broadcast completed.\nSuccess: {success}\nFailed: {fail}")
-
-@admin_only
-async def dm_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """DM a single user. Usage: /dm <user_id> (reply to a message)"""
-    if len(context.args) < 1:
-        await update.message.reply_text("Usage: /dm <user_id> (reply to a message with media/text)")
-        return
-    try:
-        target_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Invalid user ID.")
-        return
-
-    message = update.message.reply_to_message
-    if not message:
-        # If not replying, treat rest args as text
-        if len(context.args) > 1:
-            text = ' '.join(context.args[1:])
-            try:
-                await context.bot.send_message(chat_id=target_id, text=text)
-                await update.message.reply_text(f"✅ Message sent to {target_id}")
-            except Exception as e:
-                await update.message.reply_text(f"❌ Failed: {e}")
-        else:
-            await update.message.reply_text("Please reply to a message or provide text after user ID.")
-        return
-
-    if await copy_message_to_user(context.bot, target_id, message):
-        await update.message.reply_text(f"✅ Message sent to {target_id}")
-    else:
-        await update.message.reply_text(f"❌ Failed to send to {target_id}")
-
-@admin_only
-async def bulk_dm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send message to multiple users. Usage: /bulkdm <id1> <id2> ... (reply to a message)"""
-    if len(context.args) < 1:
-        await update.message.reply_text("Usage: /bulkdm <id1> <id2> ... (reply to a message)")
-        return
-    ids = []
-    for arg in context.args:
-        try:
-            ids.append(int(arg))
-        except ValueError:
-            await update.message.reply_text(f"Invalid ID: {arg}")
-            return
-
-    message = update.message.reply_to_message
-    if not message:
-        await update.message.reply_text("Please reply to a message (text/photo/video/doc) with /bulkdm")
-        return
-
-    success, fail = 0, 0
-    for uid in ids:
-        if await copy_message_to_user(context.bot, uid, message):
-            success += 1
-        else:
-            fail += 1
-    await update.message.reply_text(f"✅ Bulk DM completed.\nSuccess: {success}\nFailed: {fail}")
-
-@admin_only
-async def list_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all groups where bot has been active (admin assumed)."""
-    groups = await get_all_groups()
-    if not groups:
-        await update.message.reply_text("No groups found. Bot may not have been added to any group yet.")
-        return
-    text = "**📢 Groups where I'm active:**\n"
-    for chat_id, title, username, invite_link in groups:
-        link = invite_link or f"https://t.me/c/{str(chat_id)[4:]}"  # For private groups, approximate link
-        text += f"\n• **{title}**\n  ID: `{chat_id}`\n  Link: {link}\n"
-    await update.message.reply_text(text, parse_mode='Markdown')
 
 @admin_only
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -519,9 +494,11 @@ async def search_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = ' '.join(context.args)
     try:
         uid = int(query)
-        user = await get_user(uid)
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT * FROM users WHERE user_id = ?', (uid,)) as cursor:
+                user = await cursor.fetchone()
         if user:
-            text = f"User found:\nID: {user[0]}\nUsername: @{user[1] or 'N/A'}\nName: {user[2] or ''} {user[3] or ''}\nLookups: {user[4]}\nLast seen: {user[5]}"
+            text = f"User found:\nID: {user[0]}\nUsername: @{user[1] or 'N/A'}\nName: {user[2] or ''} {user[3] or ''}\nLookups: {user[4]}\nLast seen: {user[6]}"
         else:
             text = "User not found."
         await update.message.reply_text(text)
@@ -624,6 +601,17 @@ async def lookup_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"/{cmd}: {cnt}\n"
     await update.message.reply_text(text)
 
+@admin_only
+async def list_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    groups = await get_all_groups()
+    if not groups:
+        await update.message.reply_text("Bot is not admin in any group yet.")
+        return
+    text = "📌 **Groups where I'm admin:**\n\n"
+    for gid, name, link in groups:
+        text += f"• **{name}**\n  ID: `{gid}`\n  Link: {link if link else 'N/A'}\n\n"
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
 # ==================== OWNER COMMANDS ====================
 @owner_only
 async def add_admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -658,6 +646,27 @@ async def full_db_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(DB_PATH, 'rb') as f:
         await update.message.reply_document(f, filename='osint_bot_backup.db')
 
+# ==================== GROUP TRACKING ====================
+async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # When bot is added to a group or its admin status changes
+    if update.effective_chat.type not in ['group', 'supergroup']:
+        return
+    # Check if the bot itself is involved
+    if update.chat_member.new_chat_member.user.id != context.bot.id:
+        return
+    status = update.chat_member.new_chat_member.status
+    chat = update.effective_chat
+    if status in ['administrator', 'member']:
+        # For listing groups where bot is admin, we only store if admin
+        if status == 'administrator':
+            try:
+                invite_link = await context.bot.export_chat_invite_link(chat.id)
+            except:
+                invite_link = None
+            await add_bot_group(chat.id, chat.title or "Unnamed", invite_link)
+    elif status == 'left':
+        await remove_bot_group(chat.id)
+
 # ==================== BOT INITIALIZATION ====================
 async def post_init(app: Application):
     await init_db()
@@ -678,11 +687,34 @@ def run_bot():
         bot_app.add_handler(CommandHandler("help", help_command))
         bot_app.add_handler(CommandHandler("admin", admin_help))
 
-        # Admin commands
-        bot_app.add_handler(CommandHandler("broadcast", broadcast))
-        bot_app.add_handler(CommandHandler("dm", dm_user))
-        bot_app.add_handler(CommandHandler("bulkdm", bulk_dm))
-        bot_app.add_handler(CommandHandler("groups", list_groups))
+        # Conversation handlers for broadcast/dm/bulkdm
+        broadcast_conv = ConversationHandler(
+            entry_points=[CommandHandler('broadcast', broadcast_start)],
+            states={
+                WAITING_MESSAGE: [MessageHandler(filters.ALL & ~filters.COMMAND, receive_message)]
+            },
+            fallbacks=[CommandHandler('cancel', cancel)]
+        )
+        dm_conv = ConversationHandler(
+            entry_points=[CommandHandler('dm', dm_start)],
+            states={
+                WAITING_MESSAGE: [MessageHandler(filters.ALL & ~filters.COMMAND, receive_message)]
+            },
+            fallbacks=[CommandHandler('cancel', cancel)]
+        )
+        bulkdm_conv = ConversationHandler(
+            entry_points=[CommandHandler('bulkdm', bulkdm_start)],
+            states={
+                WAITING_MESSAGE: [MessageHandler(filters.ALL & ~filters.COMMAND, receive_message)]
+            },
+            fallbacks=[CommandHandler('cancel', cancel)]
+        )
+        bot_app.add_handler(broadcast_conv)
+        bot_app.add_handler(dm_conv)
+        bot_app.add_handler(bulkdm_conv)
+
+        # Other admin commands
+        bot_app.add_handler(CommandHandler("group", list_groups))
         bot_app.add_handler(CommandHandler("ban", ban))
         bot_app.add_handler(CommandHandler("unban", unban))
         bot_app.add_handler(CommandHandler("deleteuser", delete_user))
@@ -706,6 +738,7 @@ def run_bot():
         # Main command handler (dynamic)
         bot_app.add_handler(MessageHandler(filters.COMMAND, message_handler))
         bot_app.add_handler(CallbackQueryHandler(callback_handler))
+        bot_app.add_handler(ChatMemberHandler(track_groups, ChatMemberHandler.CHAT_MEMBER))
 
         logger.info("🚀 Bot polling started...")
         bot_app.run_polling(stop_signals=None)
