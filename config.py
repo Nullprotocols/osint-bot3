@@ -1,24 +1,34 @@
 # config.py - Complete configuration for OSINT Pro Bot on Render
+# 🔐 Use environment variables for sensitive data (BOT_TOKEN, OWNER_ID, etc.)
 
 import os
 
 # ==================== BOT TOKEN ====================
+# Render dashboard mein environment variable set karo: BOT_TOKEN
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+# ⚠️ Agar env variable set nahi hai toh default "YOUR_BOT_TOKEN_HERE" use hoga, jo ki kaam nahi karega.
 
 # ==================== DATABASE ====================
-DB_PATH = "bot_database.db"
+# ⚠️ WARNING: SQLite on Render free tier will LOSE DATA on every restart!
+# For production, use PostgreSQL (add DATABASE_URL env variable and modify database.py)
+DB_PATH = "bot_database.db"  # SQLite file name
 
 # ==================== OWNER & ADMINS ====================
-OWNER_ID = 8104850843
-INITIAL_ADMINS = [8104850843, 5987905091]
+# Render dashboard mein environment variable set karo: OWNER_ID (as integer)
+OWNER_ID = int(os.environ.get("OWNER_ID", "8104850843"))  # fallback: 8104850843
+# Render dashboard mein environment variable set karo: INITIAL_ADMINS (comma-separated IDs)
+INITIAL_ADMINS_STR = os.environ.get("INITIAL_ADMINS", "8104850843,5987905091")
+INITIAL_ADMINS = [int(x.strip()) for x in INITIAL_ADMINS_STR.split(",") if x.strip()]
 
 # ==================== FORCE JOIN CHANNELS ====================
+# Structure: list of dicts with keys: name, link, id
 FORCE_JOIN_CHANNELS = [
     {"name": "All Data Here", "link": "https://t.me/all_data_here", "id": -1003090922367},
     {"name": "OSINT Lookup", "link": "https://t.me/osint_lookup", "id": -1003698567122}
 ]
 
 # ==================== LOG CHANNELS (per command) ====================
+# Telegram channel IDs where logs for each command will be sent.
 LOG_CHANNELS = {
     "num": -1003482423742,
     "ifsc": -1003624886596,
@@ -39,12 +49,14 @@ LOG_CHANNELS = {
 }
 
 # ==================== GLOBAL BRANDING BLACKLIST ====================
+# Ye text strings API response se hata di jayengi
 GLOBAL_BLACKLIST = [
     "@patelkrish_99", "patelkrish_99", "t.me/anshapi", "anshapi",
     "@Kon_Hu_Mai", "Kon_Hu_Mai", "Dm to buy access"
 ]
 
 # ==================== COMMANDS ====================
+# Har command ka URL, parameter description, log channel ID, description, extra blacklist
 COMMANDS = {
     "num": {
         "url": "https://num-free-rootx-jai-shree-ram-14-day.vercel.app/?key=lundkinger&number={}",
