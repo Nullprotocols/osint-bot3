@@ -1,12 +1,20 @@
-# database.py - Complete Async SQLite Database for OSINT Bot
+# database.py - Complete Async SQLite Database for OSINT Bot (Fixed)
 
 import aiosqlite
 import json
 from datetime import datetime, timedelta
 from config import DB_PATH
 
+# ==================== WARNING FOR RENDER DEPLOYMENT ====================
+# ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+# SQLite on Render (free tier) uses ephemeral storage.
+# All data will be LOST on every restart, redeploy, or after sleep.
+# For production, use PostgreSQL (Render provides free PostgreSQL) or attach a persistent disk.
+# ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+
 # ==================== INIT DATABASE ====================
 async def init_db():
+    """Initialize all database tables if they don't exist."""
     async with aiosqlite.connect(DB_PATH) as db:
         # Users table
         await db.execute('''
@@ -61,6 +69,7 @@ async def init_db():
 
 # ==================== USER FUNCTIONS ====================
 async def update_user(user_id, username, first_name, last_name):
+    """Update or insert user data."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('''
             INSERT INTO users (user_id, username, first_name, last_name, last_seen)
@@ -74,38 +83,45 @@ async def update_user(user_id, username, first_name, last_name):
         await db.commit()
 
 async def is_banned(user_id):
+    """Check if a user is banned."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('SELECT 1 FROM banned WHERE user_id = ?', (user_id,)) as cursor:
             return await cursor.fetchone() is not None
 
 async def ban_user(user_id, reason, banned_by):
+    """Ban a user."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('INSERT OR REPLACE INTO banned (user_id, reason, banned_by) VALUES (?, ?, ?)',
                          (user_id, reason, banned_by))
         await db.commit()
 
 async def unban_user(user_id):
+    """Unban a user."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('DELETE FROM banned WHERE user_id = ?', (user_id,))
         await db.commit()
 
 # ==================== ADMIN FUNCTIONS ====================
 async def is_admin(user_id):
+    """Check if a user is an admin."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('SELECT 1 FROM admins WHERE user_id = ?', (user_id,)) as cursor:
             return await cursor.fetchone() is not None
 
 async def add_admin(user_id, added_by):
+    """Add a new admin."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('INSERT OR IGNORE INTO admins (user_id, added_by) VALUES (?, ?)', (user_id, added_by))
         await db.commit()
 
 async def remove_admin(user_id):
+    """Remove an admin."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('DELETE FROM admins WHERE user_id = ?', (user_id,))
         await db.commit()
 
 async def get_all_admins():
+    """Return list of all admin user IDs."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('SELECT user_id FROM admins') as cursor:
             rows = await cursor.fetchall()
@@ -113,6 +129,7 @@ async def get_all_admins():
 
 # ==================== LOOKUP FUNCTIONS ====================
 async def save_lookup(user_id, command, query, result):
+    """Save a lookup to the database and increment user's lookup count."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('''
             INSERT INTO lookups (user_id, command, query, result)
@@ -122,6 +139,7 @@ async def save_lookup(user_id, command, query, result):
         await db.commit()
 
 async def get_user_lookups(user_id, limit=10):
+    """Get recent lookups for a specific user."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('''
             SELECT command, query, timestamp FROM lookups
@@ -131,6 +149,7 @@ async def get_user_lookups(user_id, limit=10):
 
 # ==================== STATS & USER LISTS ====================
 async def get_all_users(limit=10, offset=0):
+    """Get paginated list of all users, ordered by last seen."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('''
             SELECT user_id, username, first_name, last_name, lookups, last_seen
@@ -139,6 +158,7 @@ async def get_all_users(limit=10, offset=0):
             return await cursor.fetchall()
 
 async def get_recent_users(days=7):
+    """Get users active within the last N days."""
     since = (datetime.now() - timedelta(days=days)).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('''
@@ -148,6 +168,7 @@ async def get_recent_users(days=7):
             return await cursor.fetchall()
 
 async def get_inactive_users(days=30):
+    """Get users inactive for more than N days."""
     since = (datetime.now() - timedelta(days=days)).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('''
@@ -157,6 +178,7 @@ async def get_inactive_users(days=30):
             return await cursor.fetchall()
 
 async def get_leaderboard(limit=10):
+    """Get top users by lookup count."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('''
             SELECT user_id, lookups FROM users
@@ -165,6 +187,7 @@ async def get_leaderboard(limit=10):
             return await cursor.fetchall()
 
 async def get_stats():
+    """Get overall bot statistics."""
     async with aiosqlite.connect(DB_PATH) as db:
         # Total users
         async with db.execute('SELECT COUNT(*) FROM users') as cur:
@@ -186,6 +209,7 @@ async def get_stats():
         }
 
 async def get_daily_stats(days=7):
+    """Get daily command usage statistics for the last N days."""
     since = (datetime.now() - timedelta(days=days)).date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('''
@@ -196,6 +220,7 @@ async def get_daily_stats(days=7):
             return await cursor.fetchall()
 
 async def get_lookup_stats(limit=10):
+    """Get most used commands."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('''
             SELECT command, COUNT(*) as cnt FROM lookups
@@ -205,6 +230,7 @@ async def get_lookup_stats(limit=10):
 
 # ==================== GROUP TRACKING ====================
 async def add_bot_group(group_id, group_name, invite_link=None):
+    """Add or update a group where bot is admin."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('''
             INSERT OR REPLACE INTO bot_groups (group_id, group_name, invite_link)
@@ -213,11 +239,13 @@ async def add_bot_group(group_id, group_name, invite_link=None):
         await db.commit()
 
 async def remove_bot_group(group_id):
+    """Remove a group from the list (when bot leaves or loses admin)."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('DELETE FROM bot_groups WHERE group_id = ?', (group_id,))
         await db.commit()
 
 async def get_all_groups():
+    """Get all groups where bot is admin."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('SELECT group_id, group_name, invite_link FROM bot_groups') as cursor:
             return await cursor.fetchall()
