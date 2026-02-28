@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - OSINT Pro Bot with all features (admin panel, bulkDM, group list, long output file, two-step broadcast etc.)
+# main.py - OSINT Pro Bot with all features (fixed for Render deployment)
 
 import os
 import sys
@@ -11,6 +11,7 @@ import asyncio
 import logging
 import threading
 import html
+import aiosqlite  # <-- IMPORTANT: Added missing import
 import aiohttp
 from datetime import datetime
 from flask import Flask, jsonify
@@ -671,8 +672,11 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @owner_only
 async def full_db_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with open(DB_PATH, 'rb') as f:
-        await update.message.reply_document(f, filename='osint_bot_backup.db')
+    try:
+        with open(DB_PATH, 'rb') as f:
+            await update.message.reply_document(f, filename='osint_bot_backup.db')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Backup failed: {e}")
 
 # ==================== GROUP TRACKING ====================
 async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -689,7 +693,8 @@ async def track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if status == 'administrator':
             try:
                 invite_link = await context.bot.export_chat_invite_link(chat.id)
-            except:
+            except Exception as e:
+                logger.warning(f"Could not export invite link for {chat.id}: {e}")
                 invite_link = None
             await add_bot_group(chat.id, chat.title or "Unnamed", invite_link)
     elif status == 'left':
@@ -787,12 +792,18 @@ def main():
     logger.info("🔧 Starting OSINT Pro Bot on Render Web Service...")
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         logger.error("❌ BOT_TOKEN not set! Please add it in Render environment variables.")
+    
+    # ⚠️ WARNING: SQLite on Render will lose data on restart!
+    logger.warning("⚠️ SQLite database is being used. Data will be lost on every restart!")
+    logger.warning("⚠️ For production, use PostgreSQL or attach a persistent disk.")
+    
     if BOT_TOKEN and BOT_TOKEN != "YOUR_BOT_TOKEN_HERE":
         bot_thread = threading.Thread(target=run_bot, daemon=True)
         bot_thread.start()
         logger.info("✅ Bot thread started")
     else:
         logger.warning("⚠️ Bot not started due to missing token. Flask server only.")
+    
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"🌐 Flask server starting on port {port}")
     flask_app.run(host="0.0.0.0", port=port)
