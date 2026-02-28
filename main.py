@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - OSINT Pro Bot with all features (fixed for Render deployment)
+# main.py - OSINT Pro Bot with all features (fixed file send & tg2num)
 
 import os
 import sys
@@ -11,7 +11,7 @@ import asyncio
 import logging
 import threading
 import html
-import aiosqlite  # <-- IMPORTANT: Added missing import
+import aiosqlite
 import aiohttp
 from datetime import datetime
 from flask import Flask, jsonify
@@ -219,7 +219,11 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd
                 return
             query = str(chat.id)  # Use the resolved user ID
         except Exception as e:
-            await update.message.reply_text(f"❌ Could not resolve username to ID: {e}\nMake sure the username is correct and the bot has seen the user.")
+            await update.message.reply_text(
+                f"❌ Could not resolve username to ID: {e}\n"
+                "Make sure the username is correct and the bot has seen the user "
+                "(user should have started the bot or be in a group with the bot)."
+            )
             return
 
     url = cmd_info["url"].format(query)
@@ -269,8 +273,8 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd
                 await update.message.reply_document(
                     document=f,
                     filename=filename,
-                    caption=f"📎 Output too long, sent as file.\n{extra_footer}",
-                    parse_mode=ParseMode.MARKDOWN
+                    caption=f"📎 Output too long, sent as file.\n\nDeveloper: @Nullprotocol_X\nPowered by: NULL PROTOCOL"
+                    # Parse mode hata diya, ab error nahi aayega
                 )
         except Exception as e:
             await update.message.reply_text(f"❌ File send failed: {e}")
