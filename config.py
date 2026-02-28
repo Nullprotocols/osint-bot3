@@ -24,7 +24,8 @@ INITIAL_ADMINS = [int(x.strip()) for x in INITIAL_ADMINS_STR.split(",") if x.str
 # Structure: list of dicts with keys: name, link, id
 FORCE_JOIN_CHANNELS = [
     {"name": "All Data Here", "link": "https://t.me/all_data_here", "id": -1003090922367},
-    {"name": "OSINT Lookup", "link": "https://t.me/osint_lookup", "id": -1003698567122}
+    {"name": "OSINT Lookup", "link": "https://t.me/osint_lookup", "id": -1003698567122},
+    {"name": "LEGEND CHATS", "link": "https://t.me/legend_chats_osint", "id": -1003672015073}
 ]
 
 # ==================== LOG CHANNELS (per command) ====================
@@ -63,18 +64,14 @@ COMMANDS = {
         "param": "10-digit number",
         "log": LOG_CHANNELS["num"],
         "desc": "Phone number basic lookup",
-        "extra_blacklist": [
-            "dm to buy", "owner", "@kon_hu_mai",
-            "Ruk ja bhencho itne m kya unlimited request lega?? Paid lena h to bolo 100-400₹ @Simpleguy444"
-        ]
+        "extra_blacklist": []
     },
     "tg2num": {
         "url": "https://tg2num-owner-api.vercel.app/?userid={}",
         "param": "user id",
         "log": LOG_CHANNELS["tg2num"],
         "desc": "Telegram user ID to number (if available)",
-        "extra_blacklist": ["code", "validity", "hours_remaining", "days_remaining", "expires_on",
-                            "https://t.me/AbdulBotzOfficial", "AbdulDevStoreBot", "@AbdulDevStoreBot", "credit"]
+        "extra_blacklist": []
     },
     "vehicle": {
         "url": "https://vehicle-info-aco-api.vercel.app/info?vehicle={}",
@@ -105,7 +102,7 @@ COMMANDS = {
         "extra_blacklist": []
     },
     "ffinfo": {
-        "url": "https://official-free-fire-info.onrender.com/player-info?key=DV_M7-INFO_API&uid={}",
+        "url": "https://abbas-apis.vercel.app/api/ff-info?uid={}",
         "param": "uid",
         "log": LOG_CHANNELS["ffinfo"],
         "desc": "Free Fire basic player info",
