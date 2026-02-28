@@ -207,8 +207,29 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd
         await update.message.reply_text("❌ Command not found.")
         return
 
+    # ========== SPECIAL HANDLING FOR tg2num (username support) ==========
+    if cmd == 'tg2num' and not query.isdigit():
+        # Try to resolve username to user ID
+        username = query.strip().lstrip('@')
+        try:
+            chat = await context.bot.get_chat(username)
+            if chat.type != 'private':
+                await update.message.reply_text("❌ Username must belong to a person (private user), not a group/channel.")
+                return
+            query = str(chat.id)  # Use the resolved user ID
+        except Exception as e:
+            await update.message.reply_text(f"❌ Could not resolve username to ID: {e}\nMake sure the username is correct and the bot has seen the user.")
+            return
+
     url = cmd_info["url"].format(query)
     data = await call_api(url)
+
+    # ========== REMOVE UNWANTED FIELDS FOR tg2num ==========
+    if cmd == 'tg2num' and isinstance(data, dict):
+        keys_to_remove = ["credit", "channel", "validity"]
+        for key in keys_to_remove:
+            if key in data:
+                del data[key]
 
     # Add branding to the JSON data
     if isinstance(data, dict):
@@ -234,21 +255,28 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE, cmd
 
     extra_footer = "\n\n━━━━━━━━━━━━━━━━━━━━\n👨‍💻 **Developer:** @Nullprotocol_X\n⚡ **Powered by:** NULL PROTOCOL"
 
-    # Check length and send as file if >3000 chars
-    if len(cleaned) > 3000:
+    # Prepare final HTML message
+    output_html = f"<pre>{cleaned_escaped}</pre>{extra_footer}"
+
+    # If output is too long, send as file
+    if len(output_html) > 4096 or len(cleaned) > 3000:
         filename = f"{cmd}_{query[:50].replace(' ', '_')}.json"
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write(cleaned)
-        with open(filename, 'rb') as f:
-            await update.message.reply_document(
-                document=f,
-                filename=filename,
-                caption=f"📎 Output too long, sent as file.\n{extra_footer}",
-                parse_mode=ParseMode.MARKDOWN
-            )
-        os.remove(filename)
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(cleaned)
+            with open(filename, 'rb') as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename=filename,
+                    caption=f"📎 Output too long, sent as file.\n{extra_footer}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        except Exception as e:
+            await update.message.reply_text(f"❌ File send failed: {e}")
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
     else:
-        output_html = f"<pre>{cleaned_escaped}</pre>{extra_footer}"
         keyboard = [[get_copy_button(data), get_search_button(cmd)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(output_html, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
