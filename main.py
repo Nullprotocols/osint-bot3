@@ -56,7 +56,7 @@ def clean_branding(text, extra_blacklist=None):
 async def call_api(url):
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, timeout=10) as resp:
+            async with session.get(url, timeout=20) as resp:
                 if resp.status == 200:
                     try:
                         return await resp.json()
